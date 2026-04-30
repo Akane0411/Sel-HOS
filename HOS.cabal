@@ -1,0 +1,43 @@
+cabal-version:       2.2
+
+name:                HOS
+version:             0.1.0.0
+
+
+library
+  hs-source-dirs: src
+  exposed-modules:
+      HOS
+      HOS.Data
+      HOS.Dual
+      HOS.ExampleLib
+  build-depends:
+      base >= 4.14 && < 5
+    , containers
+    , criterion
+    , free
+    , log-domain
+    , mtl
+    , mwc-random
+    , random
+    , statistics
+    , transformers
+    , vector
+  default-language: GHC2021
+
+executable example
+  hs-source-dirs: Examples
+  main-is: Examples.hs
+  build-depends:
+      base
+    , HOS
+    , free
+    , mtl
+    , random
+    , transformers
+  default-language: GHC2021
+
+
+source-repository head
+  type:     git
+  location: https://github.com/githubuser/HOS
