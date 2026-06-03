@@ -1,0 +1,20 @@
+# Stack
+.stack-work/
+stack.yaml.lock
+
+
+# GHC
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+
+# HLS
+.hie/
+.ghc.environment.*
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
