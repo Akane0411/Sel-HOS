@@ -135,28 +135,28 @@ inject = Op . inj
 data VoidEff cnt deriving Functor
                     
 
-handlerE :: forall a e r b. (Show r, Ord r, Monoid r) 
-                    => Sel r VoidEff a 
-                    -> Sel r VoidEff a
-handlerE (Pure x) = 
-  return x
-handlerE (Loss r p) = do
-  Loss r (handlerE p)
--- handlerE (Handler ret alg bind p k) = do
---   let p1 = handlerG ret alg bind (handlerE . (\x -> fmap snd $ silence (k x))) p
+-- handlerE :: forall a e r b. (Show r, Ord r, Monoid r) 
+--                     => Sel r VoidEff a 
+--                     -> Sel r VoidEff a
+-- handlerE (Pure x) = 
+--   return x
+-- handlerE (Loss r p) = do
+--   Loss r (handlerE p)
+-- -- handlerE (Handler ret alg bind p k) = do
+-- --   let p1 = handlerG ret alg bind (handlerE . (\x -> fmap snd $ silence (k x))) p
+-- --   handlerE (p1 >>= k)
+-- handlerE (Handler h p k) = do
+--   let p1 = handlerG h (handlerE . (\x -> fmap snd $ silence (k x))) p
 --   handlerE (p1 >>= k)
-handlerE (Handler h p k) = do
-  let p1 = handlerG h (handlerE . (\x -> fmap snd $ silence (k x))) p
-  handlerE (p1 >>= k)
-handlerE (LReset p) =
-  LReset ((handlerE (fmap (handlerE) p)))
-handlerE (GetLoss p) = 
-  GetLoss (handlerE . p)
-handlerE (Silence p k) = 
-  Silence (handlerE p) (handlerE . k)
--- handlerE (Op op) = 
---   Op (fmap (handlerE) op)
--- should not happen cause computation have type Sel r VoidEff a
+-- handlerE (LReset p) =
+--   LReset ((handlerE (fmap (handlerE) p)))
+-- handlerE (GetLoss p) = 
+--   GetLoss (handlerE . p)
+-- handlerE (Silence p k) = 
+--   Silence (handlerE p) (handlerE . k)
+-- -- handlerE (Op op) = 
+-- --   Op (fmap (handlerE) op)
+-- -- should not happen cause computation have type Sel r VoidEff a
 
 
 
@@ -244,8 +244,8 @@ iso f g (Handler h p k)
       liftEff f (LeftEff x) = LeftEff x
       liftEff f (RightEff x) = RightEff (f x)
 
-strength :: Functor f => (f a, b) -> f (a, b)
-strength (t, y) = fmap (\x -> (x, y)) t
+-- strength :: Functor f => (f a, b) -> f (a, b)
+-- strength (t, y) = fmap (\x -> (x, y)) t
 
 
 returnI :: (Monoid r, Functor e) => a -> Sel r e (Identity a)

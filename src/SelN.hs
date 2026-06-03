@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -Wno-noncanonical-monad-instances #-}
 
-module SelN where
 
 {-# LANGUAGE TypeOperators #-} 
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -8,6 +7,12 @@ module SelN where
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
+
+module SelN where
+
 
 import Control.Monad( ap, liftM )
 import Control.Monad.Free ( foldFree, Free(..) ) 
@@ -32,11 +37,11 @@ newtype Sel r e a =
                  -> WriterT r (Eff e) a}
 
 instance (Monoid r, Functor e) => Functor (Sel r e) where
-  fmap  = liftM
+  fmap f (Sel sl) = Sel { unSel = \p -> fmap f (sl (p . f)) }
 
 instance (Monoid r, Functor e) => Applicative (Sel r e) where
   pure  = return
-  (<*>) = ap
+  p <*> q = p >>= \f -> q >>= \x -> pure $ f x 
 
 instance (Monoid r, Functor e) => Monad (Sel r e) where
   return x       = Sel { unSel = (\ p -> pure x) }
@@ -79,6 +84,7 @@ instance {-# OVERLAPPING #-} (Functor f , Functor g) => f < (f :* g) where
     inj = LeftEff  
     prj (LeftEff a) = Just a
     prj _           = Nothing
+
 instance {-# OVERLAPPABLE #-} (Functor f , Functor g, Functor h, f < g) 
       => f < (h :* g) where 
     inj = RightEff . inj
@@ -134,7 +140,7 @@ sel2writer_ops :: (Monoid r, Functor e, Functor es)
     -> (e :* es) (WriterT r (Eff es) ans) -> WriterT r (Eff es) ans
 sel2writer_ops ops gamma = 
     (\hw -> unSel (ops (fmap (\w -> 
-              ( Sel { unSel = \s -> w},
+              ( Sel { unSel = \_ -> w},
                 Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
                              ) hw)) gamma) 
                     <+> blg
@@ -218,6 +224,19 @@ local (Sel sl) = Sel $ \_ -> censor (const mempty) (listen (sl (\_ -> return mem
 -- reset loss
 lreset :: (Monoid r, Functor e) => Sel r e a -> Sel r e a
 lreset (Sel sl) = Sel $ \_ -> censor (const mempty) (sl (\_ -> return mempty))
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

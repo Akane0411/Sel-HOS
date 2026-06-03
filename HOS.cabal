@@ -11,6 +11,10 @@ library
       HOS.Data
       HOS.Dual
       HOS.ExampleLib
+      SelN
+  other-modules:
+      HOS.Proof.ProofN
+      HOS.Proof.ProofH
   build-depends:
       base >= 4.14 && < 5
     , containers
@@ -40,4 +44,4 @@ executable example
 
 source-repository head
   type:     git
-  location: https://github.com/githubuser/HOS
+  location: https://github.com/Akane0401/HOS
