@@ -648,6 +648,7 @@ proofLemmaOp h op q =
                 )) gamma)   
             )}
 
+    -- ???
 
     -- goal?
     === (h_ops h) (fmap ( \w -> ( handlerPRet h w 
@@ -660,10 +661,6 @@ proofLemmaOp h op q =
                                 , undefined) 
                         )                                         
                         (fmap (>>= q) (fmap (\fr -> Sel { unSel = \_ -> lift fr }) op)))   
-
-
-
-
 
     -- goal?
     -- === (h_ops h) (fmap ( \w -> ( handlerPRet h w 
@@ -936,3 +933,218 @@ proofLemmaLoss h r q =
 
     -- IH 
     -- === loss r >> handlerG h cont q
+
+
+
+
+
+
+proofLemmaFoldAlgPure :: (Monoid r, Functor e, Functor es)
+    => ((a, r) -> WriterT r (Eff es) ans)
+    -> ((e :* es) (WriterT r (Eff es) ans) -> WriterT r (Eff es) ans)
+    -> a -> r -> r
+    -> Handler r e es a ans
+    -> (ans -> WriterT r (Eff es) ())
+    -> WriterT r (Eff es) ans
+proofLemmaFoldAlgPure ret alg x r r' h gamma =
+        foldAlg ret alg (fmap (\ (a , b) -> (a, r' <>  b)) (Pure (x,r)))
+    === {- definition fmap -}
+        foldAlg ret alg (Pure (x, r' <> r))
+    === {- definition of foldAlg -}
+        ret (x, r' <> r)
+    === {- ret = (\(a, r) -> tell r >> unSel (ret a) gamma) -}
+        tell (r' <> r) >> unSel (h_ret h x) gamma
+    === {- tell (r' <> r) = tell r' >> tell r -}
+        tell r' >> (tell r >> unSel (h_ret h x) gamma)
+    === {- fold back -}
+        tell r' >> foldAlg ret alg (Pure (x, r)) 
+    === {- definition of >> and tell -}
+        WriterT (do (x, r) <- runWriterT (foldAlg ret alg (Pure (x, r)))
+                    pure (x, r' <> r))
+    === {- defintion of fmap -}
+    WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                  (runWriterT (foldAlg ret alg (Pure (x,r))) ) )
+
+
+
+
+proofLemmaFoldAlgFreeR :: (Monoid r, Functor e, Functor es)
+    => ((a, r) -> WriterT r (Eff es) ans)
+    -> ((e :* es) (WriterT r (Eff es) ans) -> WriterT r (Eff es) ans)
+    -> es (Free (e :* es) (a, r))
+    -> r
+    -> Handler r e es a ans
+    -> (ans -> WriterT r (Eff es) ())
+    -> WriterT r (Eff es) ans
+proofLemmaFoldAlgFreeR ret alg op r' h gamma =
+        foldAlg ret alg (fmap (\ (a , b) -> (a, r' <>  b)) (Free (RightEff op)))
+    === {- definition of fmap -}
+        (foldAlg ret alg (Free (fmap (fmap (\ (a , b) -> (a, r' <>  b))) (RightEff op))))
+    === {- definition of foldAlg -}
+        alg (fmap (foldAlg ret alg) (fmap (fmap (\ (a , b) -> (a, r' <>  b))) (RightEff op)))
+    === {- fmap fusion -}
+        alg (fmap (foldAlg ret alg . fmap (\ (a , b) -> (a, r' <>  b))) (RightEff op))
+    === {- IH -}
+        alg (fmap ( \p -> WriterT $ fmap (\(a, b) -> (a, r' <> b)) 
+                                         (runWriterT (foldAlg ret alg p)) )
+                  (RightEff op))
+    === {- definition fmap -}
+        alg ((RightEff $ fmap (\ p -> WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                                                    (runWriterT (foldAlg ret alg p)) )) 
+                                op))
+    === {- definition alg and (<+>) -}
+        blg ( fmap (\ p -> WriterT $ (fmap (\ (a, b) -> (a, r' <> b)) 
+                                        (runWriterT (foldAlg ret alg p)) )) 
+                    op)
+    === {- definition blg -}
+        WriterT ( Free (fmap (\w -> runWriterT w) 
+                                        (fmap (\ p -> WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                                                                    (runWriterT (foldAlg ret alg p)) )) 
+                                                op) ) )
+    === {- fmap fusion -}
+        WriterT ( Free (fmap ((\w -> runWriterT w )
+                                            . (\ p -> WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                                                                    (runWriterT (foldAlg ret alg p)) )) )
+                                        op ) )
+    === {- runWriterT . WriterT = id -}
+    WriterT (Free (fmap (\ p -> fmap (\ (a, b) -> (a, r' <> b)) 
+                                        (runWriterT (foldAlg ret alg p))) 
+                             op)) 
+    === {- definition fmap -}
+    WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                (Free (fmap (\p -> (runWriterT ((foldAlg ret alg p)))) op) ))
+    === {- fmap fission -}
+    WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                (Free (fmap runWriterT 
+                        (fmap (\p -> foldAlg ret alg p) op))))
+    === {- runWriterT . WriterT = id -}
+    WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                (runWriterT (WriterT (Free (fmap runWriterT 
+                        (fmap (\p -> foldAlg ret alg p) op))))))
+    === {- definition blg -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                    (runWriterT (blg (fmap (\p -> foldAlg ret alg p) op))))
+    === {- definition of alg -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                    (runWriterT (alg (RightEff (fmap (\p -> foldAlg ret alg p) op)))))
+    === {- definition fmap -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                    (runWriterT (alg (fmap (\p -> foldAlg ret alg p) (RightEff op)))))
+    === {- definition e -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                    (runWriterT (alg (fmap (foldAlg ret alg) (RightEff op)))))           
+    === {- definition foldAlg -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                    (runWriterT (foldAlg ret alg (Free (RightEff op)))))           
+
+
+
+
+
+
+proofLemmaFoldAlgFreeL :: (Monoid r, Functor e, Functor es)
+    => ((a, r) -> WriterT r (Eff es) ans)
+    -> ((e :* es) (WriterT r (Eff es) ans) -> WriterT r (Eff es) ans)
+    -> e (Free (e :* es) (a, r))
+    -> r
+    -> Handler r e es a ans
+    -> (ans -> WriterT r (Eff es) ())
+    -> WriterT r (Eff es) ans
+proofLemmaFoldAlgFreeL ret alg op r' h gamma =
+        foldAlg ret alg (fmap (\ (a , b) -> (a, r' <>  b)) (Free (LeftEff op)))
+    === {- definition of fmap -}
+        (foldAlg ret alg (Free (fmap (fmap (\ (a , b) -> (a, r' <>  b))) (LeftEff op))))
+    === {- definition of foldAlg -}
+        alg (fmap (foldAlg ret alg) (fmap (fmap (\ (a , b) -> (a, r' <>  b))) (LeftEff op)))
+    === {- fmap fusion -}
+        alg (fmap (foldAlg ret alg . fmap (\ (a , b) -> (a, r' <>  b))) (LeftEff op))
+    === {- IH -}
+        alg (fmap ( \p -> WriterT $ fmap (\(a, b) -> (a, r' <> b)) 
+                                         (runWriterT (foldAlg ret alg p)) )
+                  (LeftEff op))
+    === {- definition fmap -}
+        alg (LeftEff $ fmap (\ p -> WriterT $ (fmap (\ (a, b) -> (a, r' <> b)) 
+                                                    (runWriterT (foldAlg ret alg p)) )) 
+                            op)
+    === {- definition alg and (<+>) -}
+        unSel ((h_ops h) (fmap (\w -> 
+                ( Sel $ \_ -> w
+                , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) ) 
+                               ) 
+                               (fmap (\ p -> WriterT $ (fmap (\ (a, b) -> (a, r' <> b)) 
+                                                             (runWriterT (foldAlg ret alg p)) )) 
+                                     op)
+              )) gamma
+
+    -- ???
+
+    === let f = (\ (a, b) -> (a, r' <> b)) 
+            g = (\w -> 
+                        ( Sel $ \_ -> w
+                        , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) ) 
+                                    )
+        in 
+        unSel ((h_ops h) (fmap g (fmap (\ p -> WriterT $ (fmap f (runWriterT (foldAlg ret alg p)) )) 
+                                       op)
+              )) gamma
+
+    === let f = (\ (a, b) -> (a, r' <> b)) 
+            g = (\w -> 
+                        ( Sel $ \_ -> w
+                        , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) ) 
+                                    )
+        in 
+        unSel ((h_ops h) (fmap g (fmap (\ p -> fmap (fmap f) (foldAlg ret alg p)) 
+                                       op)
+              )) gamma
+
+
+
+    === let f = (\ (a, b) -> (a, r' <> b)) 
+            g = (\w -> 
+                        ( Sel $ \_ -> w
+                        , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) ) 
+                                    )
+                       
+        in 
+        (fmap (fmap f)
+                    (unSel ((h_ops h) (fmap g (fmap (foldAlg ret alg) op))) 
+                            gamma) )
+
+
+    === let f = (\ (a, b) -> (a, r' <> b)) 
+            g = (\w -> 
+                        ( Sel $ \_ -> w
+                        , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) ) 
+                                    )
+                       
+        in 
+        ( WriterT $
+            fmap (\ (a, b) -> (a, r' <> b)) 
+                 (runWriterT
+                    (unSel ((h_ops h) (fmap g (fmap (foldAlg ret alg) op))) 
+                            gamma)))
+
+
+    -- ???
+
+
+    === {- definition alg -}
+        ( WriterT $
+            fmap (\ (a, b) -> (a, r' <> b)) 
+                 (runWriterT 
+                    (unSel ((h_ops h) (fmap (\w -> 
+                        ( Sel $ \_ -> w
+                        , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) )
+                                            ) (fmap (foldAlg ret alg) op) 
+                            )) 
+                            gamma)) )
+    === {- definition alg -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                      (runWriterT (alg (LeftEff (fmap (foldAlg ret alg) op)))))
+    === {- definition fmap -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                      (runWriterT (alg (fmap (foldAlg ret alg) (LeftEff op)))))
+    === {- def of foldAlg -}
+        WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
+                      (runWriterT (foldAlg ret alg (Free (LeftEff op))))) 
