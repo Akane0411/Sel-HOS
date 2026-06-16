@@ -20,6 +20,8 @@ import Control.Monad.Trans.Writer ( censor, listen, tell, WriterT(..), runWriter
 import Control.Monad.Trans.Class ( MonadTrans(lift) ) 
 import Data.Foldable (maximumBy)
 import Data.Monoid (Sum)
+import Data.Functor.Identity (Identity(..), runIdentity)
+
 
 
 
@@ -40,11 +42,13 @@ instance (Monoid r, Functor e) => Functor (Sel r e) where
   fmap f (Sel sl) = Sel { unSel = \p -> fmap f (sl (p . f)) }
 
 instance (Monoid r, Functor e) => Applicative (Sel r e) where
+  pure :: (Monoid r, Functor e) => a -> Sel r e a
   pure  = return
   p <*> q = p >>= \f -> q >>= \x -> pure $ f x 
 
 instance (Monoid r, Functor e) => Monad (Sel r e) where
-  return x       = Sel { unSel = (\ p -> pure x) }
+  return x       = Sel { unSel = (\ _ -> pure x) }
+  (>>=) :: (Monoid r, Functor e) => Sel r e a -> (a -> Sel r e b) -> Sel r e b
   (Sel sl) >>= g = 
     Sel { unSel = (\p -> sl (\a -> unSel (g a) p 
                                        >>= \y -> p y)
@@ -102,7 +106,7 @@ injectSel gfa = Sel { unSel = \_ -> lift (inject (gfa)) }
 
 
 
-
+-- does it necessary to have a and ans as parameter???
 data Handler r e es a ans = H {
     h_ret :: a -> Sel r es ans
   , h_ops :: e (Sel r es ans, Sel r es r) -> Sel r es ans
@@ -112,7 +116,6 @@ data Handler r e es a ans = H {
 {-# INLINE handlerPRet #-}
 handlerPRet :: 
   (Monoid r, Functor e, Functor es) 
-  -- => Handler r e es ans
   => Handler r e es a ans 
   -> Sel r (e :* es) a 
   -> Sel r es ans
@@ -126,18 +129,19 @@ handlerPRet h pgm
             )}
 
 
-
+-- return clause
 sel2writer_ret :: (Monoid r, Functor es)
     => (a -> Sel r es ans) 
     -> (ans -> WriterT r (Eff es) ())
     -> (a, r) -> WriterT r (Eff es) ans
 sel2writer_ret ret gamma = (\(a, r) -> tell r >> unSel (ret a) gamma)
 
-
+-- operation clause
+-- ill-defined?
 sel2writer_ops :: (Monoid r, Functor e, Functor es)
     => (e (Sel r es ans, Sel r es r) -> Sel r es ans)
-    -> (ans -> WriterT r (Eff es) ())
-    -> (e :* es) (WriterT r (Eff es) ans) -> WriterT r (Eff es) ans
+    -> (ans -> WriterT r (Eff es) ()) -- loss cont g
+    -> ((e :* es) (WriterT r (Eff es) ans)  -> WriterT r (Eff es) ans)
 sel2writer_ops ops gamma = 
     (\hw -> unSel (ops (fmap (\w -> 
               ( Sel { unSel = \_ -> w},
@@ -145,7 +149,17 @@ sel2writer_ops ops gamma =
                              ) hw)) gamma) 
                     <+> blg
 
+-- reset e
+-- local' :: (Functor e, Monoid r) => WriterT r (Eff e) a -> WriterT r (Eff e) a
 
+-- <e>
+-- reset' :: Monoid r => (a -> WriterT r (Eff e) ()) -> Sel r e a -> Sel r e a
+
+-- <<e>> \x.o
+-- lreset' :: (Functor e, Monoid r) => Sel r e a -> Sel r e a
+
+
+-- converting pgm in sel monad to free monad
 sel2free :: (Monoid r, Functor e, Functor es) 
     => Sel r (e :* es) a 
     -> (a -> Sel r es ans) 
@@ -153,19 +167,19 @@ sel2free :: (Monoid r, Functor e, Functor es)
     -> Free (e :* es) (a, r)
 sel2free pgm ret gamma = 
     runWriterT (unSel pgm (\x -> 
-        writerTMap cast ((unSel (ret x) gamma) >>= gamma)
+        writerTMap cast ((unSel (ret x) gamma) >>= gamma) -- ???
     ))
 
 
 
 loss :: (Functor e) => r -> Sel r e ()
-loss r =  Sel { unSel = (\g -> tell r) }
+loss r =  Sel { unSel = (\_ -> tell r) }
 
 cast :: (Functor e, Functor h) => Eff e ans -> Eff (h :* e) ans
 cast e = foldFree (Free . RightEff . fmap Pure) e
 
 writerTMap :: (Monad m, Monad n) => (m (a,r) -> n (a,r)) -> WriterT r m a -> WriterT r n a
-writerTMap f w = WriterT { runWriterT = f (runWriterT w) }
+writerTMap f w = WriterT $ f (runWriterT w) 
 
 
 
@@ -180,18 +194,11 @@ f <+> g = \p -> case p of
   LeftEff l  -> f l
   RightEff r -> g r
 
-
+-- forwarding clause
 blg :: (Functor e) => e (WriterT r (Eff e) a) -> WriterT r (Eff e) a
-blg e = WriterT { runWriterT = Free (fmap runWriterT e) } 
+blg e = WriterT $ Free (fmap runWriterT e) 
 
 
-
-
--- handlerPRet :: 
---   (Monoid r, Functor e, Functor es) 
---   => Handler r e es 
---   -> Sel r (e :* es) a 
---   -> Sel r es ans
 
 {-# INLINE handlerP #-}
 handlerP :: (Monoid r, Functor e, Functor es) 
@@ -210,24 +217,41 @@ runSel (Sel sl) = let va = runWriterT (sl (\a -> pure mempty))
                     Pure (a,r) -> (a, r)
 
 
--- 多分、中に蓄積されたlossのリセット
+-- 多分、中に蓄積されたlossのリセット???
 -- property functionはresetしない？
 silence :: (Monoid r, Functor e) => Sel r e a -> Sel r e a
 silence (Sel sl) = Sel $ \p -> lift $ fmap fst (runWriterT $ sl p)
 
 
 -- localize loss
+-- reset e in paper
 local :: (Monoid r, Functor e) => Sel r e a -> Sel r e (a, r)
 local (Sel sl) = Sel $ \_ -> censor (const mempty) (listen (sl (\_ -> return mempty)))
 
-
 -- reset loss
+-- <v>\x.o inpaper 
 lreset :: (Monoid r, Functor e) => Sel r e a -> Sel r e a
 lreset (Sel sl) = Sel $ \_ -> censor (const mempty) (sl (\_ -> return mempty))
 
 
 
+-- reset e
+local' :: (Functor e, Monoid r) => WriterT r (Eff e) a -> WriterT r (Eff e) a
+local' w = 
+    WriterT $ do 
+        (a, _) <- runWriterT w
+        pure (a, mempty)
 
+-- <e>
+reset' :: Monoid r => (a -> WriterT r (Eff e) ()) -> Sel r e a -> Sel r e a
+reset' g f = Sel $ \_ -> (unSel f g)
+
+-- <<e>> \x.o
+lreset' :: (Functor e, Monoid r) => Sel r e a -> Sel r e a
+lreset' (Sel sl) = 
+    Sel $ \_ -> WriterT $ do 
+        (a, _) <- runWriterT $ sl (\_ -> return mempty)
+        pure (a, mempty)
 
 
 
@@ -243,7 +267,11 @@ lreset (Sel sl) = Sel $ \_ -> censor (const mempty) (sl (\_ -> return mempty))
 -- greedy
 
 -- [effect|data Max a = Max { max :: Op [a] a } |]
-data Max a r = Max [a] (a -> r) deriving Functor
+data Max c r = Max [c] (c -> r) --deriving Functor
+
+instance Functor (Max c) where
+    fmap :: (a -> b) -> Max c a -> Max c b
+    fmap f (Max lst k) = Max lst (f . k)
 
 -- max :: (Monoid r, Functor e) => [c] -> Sel r (Max c :* e) c
 -- max lst = blg' (LeftEff (Max lst pure))
@@ -285,3 +313,26 @@ pgm = do
 -- test1 :: String
 test1 :: (String, Sum (Int))
 test1 = runSel $ (hmax @String) pgm
+
+
+
+
+-- experiment
+experiment :: (Max String :? e, Monoid r, Num r) => Sel r e String
+experiment = do
+  loss 1
+  s <- maxE ["aaa", "aabb", "abc"]
+  return s
+
+hEx :: forall r e a. (Functor e, Monoid r, Num r, Ord r) 
+              => Sel r (Max String :* e) a -> Sel r e a
+hEx = handlerP alg where
+  alg (Max [s1, s2, s3] k) = do
+    b <- (snd . k) s1
+    if (b > 0) 
+      then (fst . k) s1
+      else (fst . k) s2
+
+exResult :: (String, Sum(Int))
+exResult =  runSel $ hEx experiment
+

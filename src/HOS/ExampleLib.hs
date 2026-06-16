@@ -1,8 +1,10 @@
-{-# LANGUAGE QuasiQuotes, TypeOperators, FlexibleContexts, ExplicitForAll, TypeApplications #-}
+{-# LANGUAGE QuasiQuotes, FlexibleContexts, ExplicitForAll, TypeApplications #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+
+
 
 
 module HOS.ExampleLib where
@@ -346,3 +348,32 @@ hyperOptimResult :: (Float, DF)
 hyperOptimResult = 
   let ((a,_), r) = runSel $ hyperOptim 
   in (a,r)
+
+
+-- experiment
+experiment :: (Max String :? e) => Sel Float e String
+experiment = do
+  loss 1
+  s <- max ["aaa", "aabb", "abc"]
+  return s
+
+exAlgebra :: forall e a. (Functor e) 
+              => Max String ((Sel Float e a, Sel Float e Float)) -> Sel Float e a
+exAlgebra (Max [s1, s2, s3] k) = do
+    b <- (snd . k) s1
+    if (b > 0) 
+      then (fst . k) s1
+      else (fst . k) s2
+
+hEx :: forall e a. (Functor e) 
+        => Sel Float (Max String :* e) a -> Sel Float e a
+hEx = fmap runIdentity . 
+        handler H {
+                    h_ret = return . Identity
+                  , h_ops = exAlgebra 
+                  , h_bnd = \(Identity x) f -> f x
+                  }
+
+
+exResult :: (String, Float)
+exResult =  runSel $ hEx experiment

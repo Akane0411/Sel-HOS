@@ -1094,23 +1094,31 @@ proofLemmaFoldAlgFreeL ret alg op r' h gamma =
                         , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) ) 
                                     )
         in 
-        unSel ((h_ops h) (fmap g (fmap (\ p -> fmap (fmap f) (foldAlg ret alg p)) 
-                                       op)
+        unSel ((h_ops h) (fmap ( (\ p -> g (WriterT $ (fmap f (runWriterT (foldAlg ret alg p)) ))) 
+                                    )op
               )) gamma
 
 
+    === let f = (\ (a, b) -> (a, r' <> b)) 
+        in 
+        unSel ((h_ops h) (fmap ( (\ p -> 
+                        ( Sel $ \_ -> (WriterT $ (fmap f (runWriterT (foldAlg ret alg p)) ))
+                        , Sel $ \_ -> lift (fmap snd (runWriterT ((WriterT $ (fmap f (runWriterT (foldAlg ret alg p)) )) >>= gamma))) )) 
+                                    ) op
+              )) gamma
 
     === let f = (\ (a, b) -> (a, r' <> b)) 
-            g = (\w -> 
-                        ( Sel $ \_ -> w
-                        , Sel $ \_ -> lift (fmap snd (runWriterT (w >>= gamma))) ) 
-                                    )
-                       
         in 
-        (fmap (fmap f)
-                    (unSel ((h_ops h) (fmap g (fmap (foldAlg ret alg) op))) 
-                            gamma) )
+        unSel ((h_ops h) (fmap ( (\ p -> 
+                        ( Sel $ \_ -> (WriterT $ (fmap f (runWriterT (foldAlg ret alg p)) ))
+                        , Sel $ \_ -> lift (fmap snd (runWriterT (
+                                                        (WriterT $ (fmap f (runWriterT (foldAlg ret alg p)) )) >>= gamma
+                                                                 )
+                                                     )) )) 
+                                    ) op
+              )) gamma
 
+    --- ???
 
     === let f = (\ (a, b) -> (a, r' <> b)) 
             g = (\w -> 
@@ -1148,3 +1156,268 @@ proofLemmaFoldAlgFreeL ret alg op r' h gamma =
     === {- def of foldAlg -}
         WriterT (fmap (\ (a, b) -> (a, r' <> b)) 
                       (runWriterT (foldAlg ret alg (Free (LeftEff op))))) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-- experiment
+
+exAlg :: (Functor e, Monoid r, Num r, Ord r) => Max String (Sel r e b, Sel r e r) -> Sel r e b
+exAlg (Max [s1, s2, s3] k) = do
+    b <- (snd . k) s1
+    if (b > 0) 
+        then (fst . k) s1
+        else (fst . k) s2
+
+expr :: (Monoid r, Num r, Ord r) => Sel r (Max String :* VoidEff) String
+expr = do
+    loss 1
+    s <- maxE ["aaa", "aabb"]
+    return s 
+
+
+expr' :: (Monoid r, Num r, Ord r) => Sel r (Max String :* VoidEff) String
+expr' = do
+    Sel { unSel = (\_ -> tell 1) } >>= \_ -> Sel { unSel = \_ -> lift ((Free . inj) (Max ["aaa", "aabb"] Pure)) } 
+
+
+expr'' :: (Monoid r, Num r, Ord r) => Sel r (Max String :* VoidEff) String
+expr'' = do
+    Sel { unSel = 
+            ( \p -> WriterT $ do 
+                    (b, r2) <- runWriterT $ lift ((Free . inj) (Max ["aaa", "aabb"] Pure))
+                    return (b, 1 <> r2)
+            )   } 
+    -- p appeares nowhere 
+    -- loss happend before affect resulting loss value
+
+
+experiment :: (Monoid r, Num r, Ord r) => Sel r VoidEff String
+experiment = 
+        SelN.hEx SelN.experiment
+
+    === handlerP exAlg expr
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }  
+        in handlerPRet exH expr
+            
+    === let exH = H { h_ret = (return), h_ops = exAlg }  
+        in Sel { unSel = 
+                (\gamma -> 
+                    foldAlg 
+                        (sel2writer_ret (h_ret exH) gamma) 
+                        (sel2writer_ops (h_ops exH) gamma)
+                        (sel2free expr (h_ret exH) gamma)
+                )}
+    
+    === let exH = H { h_ret = (return), h_ops = exAlg } 
+            expr = Sel { unSel = 
+                        ( \_ -> WriterT $ do 
+                                (b, r2) <- runWriterT $ lift ((Free . LeftEff) (Max ["aaa", "aabb"] Pure))
+                                return (b, 1 <> r2)
+                        )   } 
+        in Sel { unSel = 
+                (\gamma -> 
+                    foldAlg 
+                        (sel2writer_ret (h_ret exH) gamma) 
+                        (sel2writer_ops (h_ops exH) gamma)
+                        (runWriterT (unSel expr (\x -> 
+                            writerTMap cast ((unSel ((h_ret exH) x) gamma) >>= gamma) -- ???
+                        )))
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }   
+        in Sel { unSel = 
+                (\gamma -> 
+                    foldAlg 
+                        (sel2writer_ret (h_ret exH) gamma) 
+                        (sel2writer_ops (h_ops exH) gamma)
+                        (do (b, r2) <- runWriterT $ WriterT $ do
+                                                    a <- ((Free . LeftEff) (Max ["aaa", "aabb"] Pure))
+                                                    return (a, mempty)
+                            return (b, 1 <> r2))
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }   
+        in Sel { unSel = 
+                (\gamma -> 
+                    foldAlg 
+                        (sel2writer_ret (h_ret exH) gamma) 
+                        (sel2writer_ops (h_ops exH) gamma)
+                        (do b <- ((Free . LeftEff) (Max ["aaa", "aabb"] Pure))
+                            return (b, 1))
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }   
+        in Sel { unSel = 
+                (\gamma -> 
+                    foldAlg 
+                        (sel2writer_ret (h_ret exH) gamma) 
+                        (sel2writer_ops (h_ops exH) gamma)
+                        (do Free (fmap (>>= (\b -> return (b, 1))) (LeftEff (Max ["aaa", "aabb"] Pure))) )
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+            e   = (fmap (>>= (\b -> return (b, 1))) (LeftEff (Max ["aaa", "aabb"] Pure)))
+        in Sel { unSel = 
+                (\gamma -> 
+                    (sel2writer_ops (h_ops exH) gamma) (fmap (foldAlg (sel2writer_ret (h_ret exH) gamma) (sel2writer_ops (h_ops exH) gamma)) e)
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+            e   = (LeftEff (Max ["aaa", "aabb"] (\b -> return (b, 1))))
+        in Sel { unSel = 
+                (\gamma -> 
+                    ((\hw -> unSel ((h_ops exH) (fmap (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) hw)) gamma) 
+                                    <+> blg) 
+                    (fmap (foldAlg (sel2writer_ret (h_ret exH) gamma) (sel2writer_ops (h_ops exH) gamma)) e)
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    ((\hw -> unSel ((h_ops exH) (fmap (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) hw)) gamma) 
+                                    <+> blg) 
+                    ( LeftEff (fmap (foldAlg (sel2writer_ret (h_ret exH) gamma) (sel2writer_ops (h_ops exH) gamma)) 
+                                    (Max ["aaa", "aabb"] (\b -> return (b, 1)))) )
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    ((\hw -> unSel ((h_ops exH) (fmap (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) hw)) gamma) 
+                                    <+> blg) 
+                    ( LeftEff ( Max ["aaa", "aabb"] ((\p -> foldAlg (sel2writer_ret (h_ret exH) gamma) (sel2writer_ops (h_ops exH) gamma) (Pure (p, 1)) )))) 
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    ((\hw -> unSel ((h_ops exH) (fmap (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) hw)) gamma) 
+                                    <+> blg) 
+                    ( LeftEff ( Max ["aaa", "aabb"] ((\p -> (sel2writer_ret (h_ret exH) gamma) (p, 1) )))) 
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    ((\hw -> unSel ((h_ops exH) (fmap (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) hw)) gamma) 
+                                    <+> blg) 
+                    ( LeftEff ( Max ["aaa", "aabb"] (\p -> (tell 1 >> unSel (return p) gamma) ))) 
+                )}
+    
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    ((\hw -> unSel ((h_ops exH) (fmap (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) hw)) gamma) 
+                                    <+> blg) 
+                    ( LeftEff ( Max ["aaa", "aabb"] (\p -> ( WriterT $ Pure (p, 1) ))) )
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    (unSel ((h_ops exH) (fmap (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) (Max ["aaa", "aabb"] (\p -> ( WriterT $ Pure (p, 1) ))))) gamma) 
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    (unSel ((h_ops exH) ((Max ["aaa", "aabb"] ( (\w -> 
+                            ( Sel { unSel = \_ -> w},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT (w >>= gamma)))} )
+                                            ) . (\p -> WriterT $ Pure (p, 1) ))))) gamma) 
+                )}
+
+    === let exH = H { h_ret = (return), h_ops = exAlg }
+        in Sel { unSel = 
+                (\gamma -> 
+                    (unSel ((h_ops exH) (Max ["aaa", "aabb"] ( \w -> 
+                            ( Sel { unSel = \_ -> WriterT $ Pure (w, 1)},
+                              Sel { unSel = \_ -> lift (fmap snd (runWriterT ((WriterT $ Pure (w, 1)) >>= gamma)))} )
+                                            ) 
+                                        )
+                            ) gamma) 
+                )}
+
+    === Sel { unSel = 
+                (\gamma -> 
+                    (unSel (do
+                            b <- (\w -> Sel { unSel = \_ -> lift (fmap snd (runWriterT ((WriterT $ Pure (w, 1)) >>= gamma)))}) "aaa"
+                            if (b > 0) 
+                                then (\w -> Sel { unSel = \_ -> WriterT $ Pure (w, 1)}) "aaa"
+                                else (\w -> Sel { unSel = \_ -> WriterT $ Pure (w, 1)}) "aabb" 
+                            ) gamma) 
+                )}
+
+    === Sel { unSel = 
+                (\gamma -> 
+                    (unSel (do
+                            b <- ( Sel { unSel = \_ -> lift (fmap snd (( do
+                                        (b,r2) <- runWriterT $ gamma "aaa"
+                                        return (b, 1 <> r2)
+                                )))}) 
+                            if (b > 0) 
+                                then (\w -> Sel { unSel = \_ -> WriterT $ Pure (w, 1)}) "aaa"
+                                else (\w -> Sel { unSel = \_ -> WriterT $ Pure (w, 1)}) "aabb" 
+                            ) gamma) 
+                )}
+
+
+
+experiment' :: (Monoid r, Num r, Ord r) => (String, r)
+experiment' = 
+        SelN.runSel $ SelN.hEx SelN.experiment
+    
+    === (SelN.runSel $ Sel { unSel = 
+                (\gamma -> 
+                    (unSel (do
+                            b <- ( Sel { unSel = \_ -> lift (fmap snd (( do
+                                        (b,r2) <- runWriterT $ gamma "aaa"
+                                        return (b, 1 <> r2)
+                                )))}) 
+                            if (b > 0) 
+                                then (\w -> Sel { unSel = \_ -> WriterT $ Pure (w, 1)}) "aaa"
+                                else (\w -> Sel { unSel = \_ -> WriterT $ Pure (w, 1)}) "aabb" 
+                            ) gamma) 
+                )})
