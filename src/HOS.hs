@@ -25,12 +25,13 @@ import Data.Functor.Const (Const (..))
 
 
 
-class SelM sel m r e es a where
-  opM      :: e (sel r es a) -> sel r es a
-  lossM    :: r -> sel r es a -> sel r es a
-  handlerM :: forall b. Handler r e es m -> sel r (e :* es) b -> ((m b) -> sel r es a)
-  lresetM  :: sel r es (sel r es a) -> sel r es a
+-- class SelM sel m r e es a where
+--   opM      :: e (sel r es a) -> sel r es a
+--   lossM    :: r -> sel r es a -> sel r es a
+--   handlerM :: forall b. Handler r e es m -> sel r (e :* es) b -> ((m b) -> sel r es a)
+--   lresetM  :: sel r es (sel r es a) -> sel r es a
 
+-- syntax 
 data Sel r es a
   = Pure a
   | Op (es (Sel r es a))
@@ -49,6 +50,8 @@ data Handler r e es m = H {
   , h_bnd :: forall c a. m a -> (a -> Sel r es (m c)) -> Sel r es (m c)
   }
 
+
+-- smart constructor
 loss :: (Monoid r, Functor e) => r -> Sel r e ()
 loss l = Loss l (Pure ())
 
@@ -96,6 +99,7 @@ instance (Monoid r, Functor e) => MonadFail (Sel r e) where
   fail = undefined
 
 
+-- data type a la carte
 infixr 5 :*
 
 data (:*) f g x 
@@ -108,7 +112,8 @@ instance (Functor f, Functor g) => Functor((:*) f g) where
 
 
 
--- is `h` in the effect context `e` ?
+-- f :? fs
+-- Is f in the effect context fs ?
 class (Functor sub, Functor sup) => sub :? sup where 
   inj :: sub a -> sup a
   prj :: sup a -> Maybe (sub a)
@@ -132,74 +137,43 @@ inject :: (g :? f) => g (Sel r f a) -> Sel r f a
 inject = Op . inj
 
 
+
+-- no effect
 data VoidEff cnt deriving Functor
-                    
-
--- handlerE :: forall a e r b. (Show r, Ord r, Monoid r) 
---                     => Sel r VoidEff a 
---                     -> Sel r VoidEff a
--- handlerE (Pure x) = 
---   return x
--- handlerE (Loss r p) = do
---   Loss r (handlerE p)
--- -- handlerE (Handler ret alg bind p k) = do
--- --   let p1 = handlerG ret alg bind (handlerE . (\x -> fmap snd $ silence (k x))) p
--- --   handlerE (p1 >>= k)
--- handlerE (Handler h p k) = do
---   let p1 = handlerG h (handlerE . (\x -> fmap snd $ silence (k x))) p
---   handlerE (p1 >>= k)
--- handlerE (LReset p) =
---   LReset ((handlerE (fmap (handlerE) p)))
--- handlerE (GetLoss p) = 
---   GetLoss (handlerE . p)
--- handlerE (Silence p k) = 
---   Silence (handlerE p) (handlerE . k)
--- -- handlerE (Op op) = 
--- --   Op (fmap (handlerE) op)
--- -- should not happen cause computation have type Sel r VoidEff a
+                  
 
 
-
-handlerG :: forall e es r m a b. (Show r,Ord r, Monoid r, Functor e, Functor es, Functor m) 
-                    -- => (forall b. b -> Sel r es (m b)) -- return
-                    -- -> (forall b. (Functor es) 
-                    --     => e (Sel r es (m b), Sel r es r) 
-                    --     -> Sel r es (m b)) -- operation
-                    -- -> (forall b a. (m a) -> (a -> Sel r es (m b)) -> Sel r es (m b)) -- bind
+-- interpreter for effects
+handle :: forall e es r m a b. (Show r,Ord r, Monoid r, Functor e, Functor es, Functor m) 
                     => Handler r e es m
                     -> (m a -> Sel r es r) -- loss continuation
-                    -> Sel r (e :* es) a -- computation
+                    -> Sel r (e :* es) a   -- computation
                     -> Sel r es (m a)
-handlerG h cont (Pure x) = 
+handle h cont (Pure x) = 
   h_ret h x 
-handlerG h cont (Loss r p) = 
-  Loss r (handlerG h cont p)
-handlerG h cont (Op (LeftEff op)) = 
-  h_ops h (fmap (\p -> ( handlerG h cont p 
-                       , toLossCont (handlerG h cont p) cont))                                         
+handle h cont (Loss r p) = 
+  Loss r (handle h cont p)
+handle h cont (Op (LeftEff op)) = 
+  h_ops h (fmap (\p -> ( handle h cont p 
+                       , toLossCont (handle h cont p) cont))                                         
             op)
-handlerG h1 cont (Handler h2 p k) = do
-  let p1 = handlerG h2 (\mx -> 
-              iso shiftRight shiftLeft $ toLossCont (handlerG h1 cont (k mx)) cont) p -- ???
+handle h1 cont (Handler h2 p k) = do
+  let p1 = handle h2 (\mx -> 
+              iso shiftRight shiftLeft $ toLossCont (handle h1 cont (k mx)) cont) p -- ???
   let p2 = p1 >>= k
-  handlerG h1 cont p2
--- handlerG ret1 alg1 bind1 cont (Handler ret2 alg2 bind2 p k) = do
---   let p1 = handlerG ret2 alg2 bind2 (\mx -> 
---               iso shiftRight shiftLeft $ toLossCont (handlerG ret1 alg1 bind1 cont (k mx)) cont) p -- ???
---   let p2 = p1 >>= k
---   handlerG ret1 alg1 bind1 cont p2
-handlerG h cont (LReset p) = do
-  let p1 = fmap (handlerG h cont) p
-  let p2 = handlerG h (\_ -> return mempty) p1
+  handle h1 cont p2
+handle h cont (LReset p) = do
+  let p1 = fmap (handle h cont) p
+  let p2 = handle h (\_ -> return mempty) p1
   let p3 = fmap (\x -> h_bnd h x id) $ p2
   LReset p3
-handlerG h cont (GetLoss p) =
-  GetLoss (handlerG h cont . p)
-handlerG h cont (Silence p k) = 
-  Silence (handlerG h (\mb -> silence (h_bnd h mb ((handlerG h cont) . k)) >>= \(ma, r1) -> cont ma >>= \r2 -> return (r1 <> r2)) (p >>= \x -> getloss >>= \r -> (return (x, r)))) 
-          (\(mb, _) -> h_bnd h mb ((handlerG h cont) . k))
-handlerG h cont (Op (RightEff op)) = 
-  Op (fmap (handlerG h cont) op)
+handle h cont (GetLoss p) =
+  GetLoss (handle h cont . p)
+handle h cont (Silence p k) = 
+  Silence (handle h (\mb -> silence (h_bnd h mb ((handle h cont) . k)) >>= \(ma, r1) -> cont ma >>= \r2 -> return (r1 <> r2)) (p >>= \x -> getloss >>= \r -> (return (x, r)))) 
+          (\(mb, _) -> h_bnd h mb ((handle h cont) . k))
+handle h cont (Op (RightEff op)) = 
+  Op (fmap (handle h cont) op)
 
 
 
@@ -233,31 +207,23 @@ iso f g (Handler h p k)
               }
             (iso (liftEff f) (liftEff g) p) 
             ((iso f g) . k)
--- iso f g (Handler ret alg bind p k) 
---   = Handler (iso f g . ret) 
---             (\ep -> ((iso f g) . alg . (fmap (\(b,r) -> (iso g f b, iso g f r)))) ep) 
---             (\ma h -> iso f g (bind ma (iso g f . h))) 
---             (iso (liftEff f) (liftEff g) p) 
---             ((iso f g) . k) 
       where
       liftEff :: (forall x. es x -> es' x) -> (forall y. (e :* es) y -> (e :* es') y)
       liftEff f (LeftEff x) = LeftEff x
       liftEff f (RightEff x) = RightEff (f x)
 
--- strength :: Functor f => (f a, b) -> f (a, b)
--- strength (t, y) = fmap (\x -> (x, y)) t
 
-
+-- trivial return clause
 returnI :: (Monoid r, Functor e) => a -> Sel r e (Identity a)
 returnI = return . Identity
 
+-- trivial forwarding clause
 bindI :: Identity a -> (a -> b) -> b
 bindI = \(Identity x) f -> f x
 
 
 
-
-
+-- interpreter for losses
 runSel :: (Monoid r, Show r, Ord r) => Sel r VoidEff a -> (a, r)
 runSel p = worker p mempty where
   worker :: (Monoid r, Show r, Ord r) => Sel r VoidEff a -> r -> (a, r)
@@ -270,47 +236,8 @@ runSel p = worker p mempty where
   worker (LReset k) acc = 
     fst $ worker (fmap (\p -> worker p acc) k) mempty
   worker (Handler h p k) acc = do
-    let p1 = handlerG h ((\x -> fmap snd $ silence (k x))) p
+    let p1 = handle h ((\x -> fmap snd $ silence (k x))) p
     worker (p1 >>= k) acc
-
--- lemma:
--- worker (fmap f p) acc = f (worker p acc)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
