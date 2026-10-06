@@ -55,6 +55,9 @@ data Handler r e es m = H {
 loss :: (Monoid r, Functor e) => r -> Sel r e ()
 loss l = Loss l (Pure ())
 
+-- in here, silence is made to create loss continuation
+-- it reset loss continuation during exection of p
+-- <e>\x.0 ?
 silence :: (Monoid r, Functor es) => Sel r es a -> Sel r es (a, r)
 silence p = Silence p Pure
 
@@ -90,9 +93,9 @@ instance (Monoid r, Functor e) => Monad (Sel r e) where
   Op op             >>= f = Op $ fmap (>>= f) op
   Loss r s          >>= f = Loss r (s >>= f)
   LReset s          >>= f = LReset $ fmap (>>= f) s
-  GetLoss p         >>= f = GetLoss $ fmap (>>= f) p
+  GetLoss k         >>= f = GetLoss $ fmap (>>= f) k
   Silence p k       >>= f = Silence p $ fmap (>>= f) k
-  Handler h p k     >>= f = Handler h p $ (>>=f) . k
+  Handler h p k     >>= f = Handler h p $ (>>= f) . k
   
 -- for linearReg function in linear regression exapmle
 instance (Monoid r, Functor e) => MonadFail (Sel r e) where
@@ -101,7 +104,6 @@ instance (Monoid r, Functor e) => MonadFail (Sel r e) where
 
 -- data type a la carte
 infixr 5 :*
-
 data (:*) f g x 
     = LeftEff (f x) 
     | RightEff (g x) 
@@ -159,7 +161,8 @@ handle h cont (Op (LeftEff op)) =
             op)
 handle h1 cont (Handler h2 p k) = do
   let p1 = handle h2 (\mx -> 
-              iso shiftRight shiftLeft $ toLossCont (handle h1 cont (k mx)) cont) p -- ???
+              iso shiftRight shiftLeft $ toLossCont (handle h1 cont (k mx)) cont
+                     ) p -- ???
   let p2 = p1 >>= k
   handle h1 cont p2
 handle h cont (LReset p) = do
@@ -170,7 +173,10 @@ handle h cont (LReset p) = do
 handle h cont (GetLoss p) =
   GetLoss (handle h cont . p)
 handle h cont (Silence p k) = 
-  Silence (handle h (\mb -> silence (h_bnd h mb ((handle h cont) . k)) >>= \(ma, r1) -> cont ma >>= \r2 -> return (r1 <> r2)) (p >>= \x -> getloss >>= \r -> (return (x, r)))) 
+  Silence (handle h (\mb -> silence (h_bnd h mb ((handle h cont) . k)) 
+              >>= \(ma, r1) -> cont ma 
+              >>= \r2 -> return (r1 <> r2)) 
+                    (p >>= \x -> getloss >>= \r -> (return (x, r)))) 
           (\(mb, _) -> h_bnd h mb ((handle h cont) . k))
 handle h cont (Op (RightEff op)) = 
   Op (fmap (handle h cont) op)
@@ -240,6 +246,21 @@ runSel p = worker p mempty where
     worker (p1 >>= k) acc
 
 
+
+-- -- reset e
+-- reset :: (Monoid r, Show r, Ord r) => Sel r VoidEff a -> Sel r VoidEff a
+-- reset sl = let (a,_) = runSel sl in pure a
+
+-- < e >
+-- local :: Monoid r => (a -> Eff r e r) -> Sel r e a -> Sel r e a
+-- local g f = Sel $ \_ -> (unSel f g)
+
+-- reset (<e> \x.0)
+-- lreset :: Sel r e a -> Sel r e a
+-- lreset f = 
+--     Sel $ \_ -> do 
+--         (_, a) <- unSel f (\_ -> return mempty)
+--         return (mempty, a)
 
 
 

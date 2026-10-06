@@ -8,13 +8,12 @@ library
   hs-source-dirs: src
   exposed-modules:
       HOS
+      HOSp
       HOS.Data
       HOS.Dual
       HOS.ExampleLib
+      HOS.ExampleLib2
       SelN
-  other-modules:
-      HOS.Proof.ProofN
-      HOS.Proof.ProofH
   build-depends:
       base >= 4.14 && < 5
     , containers
