@@ -151,18 +151,17 @@ handle h par cont (Pure x) =
 handle h par cont (Loss r p) = 
   Loss r (handle h par cont p)
 handle h par cont (Op (LeftEff op)) = 
-  h_ops h (fmap (\p -> ( handle h par cont p 
-                       , toLossCont (handle h par cont p) cont))                                         
+  h_ops h par (fmap (\p -> ( \pp -> handle h pp cont p  -- pp or par?
+                           , \pp -> toLossCont (handle h pp cont p) cont))                                         
             op)
 handle h1 par1 cont (Handler h2 par2 p k) = do
   let p1 = handle h2 par2 (\mx -> 
               iso shiftRight shiftLeft $ toLossCont (handle h1 par1 cont (k mx)) cont
-                     ) p -- ???
-  let p2 = p1 >>= k
-  handle h1 par1 cont p2
+                          ) p 
+  handle h1 par1 cont (p1 >>= k)
 handle h par cont (LReset p) = do
   let p1 = fmap (handle h par cont) p
-  let p2 = handle h (\_ -> return mempty) p1
+  let p2 = handle h par (\_ -> return mempty) p1
   let p3 = fmap (\x -> h_bnd h par x id) $ p2
   LReset p3
 handle h par cont (GetLoss p) =
@@ -202,9 +201,12 @@ iso f g (GetLoss k)   = GetLoss (iso f g . k)
 iso f g (Silence p k) = Silence (iso f g p) (iso f g . k)
 iso f g (Handler h par p k) 
   = Handler H {
-                h_ret = \pp -> (iso f g . h_ret h pp),
-                h_ops = \pp -> (\ep -> ((iso f g) . h_ops h pp . (fmap (\(b,r) -> (\pp' -> iso g f b, \pp' -> iso g f r)))) ep), 
-                h_bnd = \pp -> (\ma s -> iso f g (h_bnd h pp ma (iso g f . s))) 
+        h_ret = \pp -> (iso f g . h_ret h pp),
+        h_ops = \pp -> (\ep -> ((iso f g) . 
+                                    h_ops h pp . 
+                                        (fmap (\(b,r) -> (\pp' -> iso g f (b pp'), \pp' -> iso g f (r pp')))) 
+                               ) ep), 
+        h_bnd = \pp -> (\ma s -> iso f g (h_bnd h pp ma (iso g f . s))) 
               }
             par
             (iso (liftEff f) (liftEff g) p) 
